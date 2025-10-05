@@ -176,11 +176,35 @@ class KatFileUploaderEnhanced:
             command=self.toggle_password_visibility
         ).pack(side=tk.RIGHT, padx=(5, 0))
         
-        # 測試壓縮
-        test_frame = ttk.LabelFrame(parent, text="測試壓縮", padding="10")
-        test_frame.pack(fill=tk.X, padx=10, pady=10)
+        # 檔案分割設定
+        split_frame = ttk.LabelFrame(compress_frame, text="檔案分割設定", padding="10")
+        split_frame.pack(fill="x", pady=(10, 0))
         
-        ttk.Button(test_frame, text="🧪 測試壓縮功能", command=self.test_compression).pack()
+        self.enable_split = tk.BooleanVar(value=False)
+        ttk.Checkbutton(split_frame, text="啟用檔案分割", variable=self.enable_split, 
+                       command=self.toggle_split_options).pack(anchor="w")
+        
+        self.split_options_frame = ttk.Frame(split_frame)
+        self.split_options_frame.pack(fill="x", pady=(10, 0))
+        
+        # 分割大小設定
+        size_frame = ttk.Frame(self.split_options_frame)
+        size_frame.pack(fill="x")
+        
+        ttk.Label(size_frame, text="分割大小:").pack(side="left")
+        self.split_size = tk.StringVar(value="100")
+        ttk.Entry(size_frame, textvariable=self.split_size, width=10).pack(side="left", padx=(5, 0))
+        
+        self.split_unit = tk.StringVar(value="MB")
+        unit_combo = ttk.Combobox(size_frame, textvariable=self.split_unit, values=["MB", "GB"], 
+                                 state="readonly", width=5)
+        unit_combo.pack(side="left", padx=(5, 0))
+        
+        # 初始狀態設定
+        self.toggle_split_options()
+
+        # 壓縮測試按鈕
+        ttk.Button(compress_frame, text="🧪 測試壓縮", command=self.test_compression).pack(pady=10)
         
         # 壓縮說明
         info_frame = ttk.LabelFrame(parent, text="說明", padding="10")
@@ -275,6 +299,18 @@ class KatFileUploaderEnhanced:
         else:
             self.password_entry.config(show="*")
     
+    def toggle_split_options(self):
+        """切換分割選項的可見性"""
+        if self.enable_split.get():
+            for widget in self.split_options_frame.winfo_children():
+                widget.configure(state="normal")
+        else:
+            for widget in self.split_options_frame.winfo_children():
+                try:
+                    widget.configure(state="disabled")
+                except:
+                    pass
+
     def test_compression(self):
         """測試壓縮功能"""
         if not self.compress_enabled.get():
@@ -511,13 +547,100 @@ class KatFileUploaderEnhanced:
             print(f"建立超連結失敗: {e}")
             return False
 
+    def split_file(self, file_path, split_size_mb):
+        """分割檔案"""
+        try:
+            file_path = Path(file_path)
+            if not file_path.exists():
+                raise FileNotFoundError(f"檔案不存在: {file_path}")
+            
+            split_size_bytes = split_size_mb * 1024 * 1024
+            file_size = file_path.stat().st_size
+            
+            if file_size <= split_size_bytes:
+                # 檔案太小，不需要分割
+                return [file_path]
+            
+            split_files = []
+            output_dir = file_path.parent / f"{file_path.stem}_parts"
+            output_dir.mkdir(exist_ok=True)
+            
+            self.log(f"✂️ 開始分割檔案：{file_path.name}")
+            
+            with open(file_path, 'rb') as input_file:
+                part_num = 1
+                while True:
+                    chunk = input_file.read(split_size_bytes)
+                    if not chunk:
+                        break
+                    
+                    part_file = output_dir / f"{file_path.stem}.part{part_num:03d}"
+                    with open(part_file, 'wb') as part_output:
+                        part_output.write(chunk)
+                    
+                    split_files.append(part_file)
+                    self.log(f"📄 建立分割檔案：{part_file.name}")
+                    part_num += 1
+            
+            self.log(f"✅ 分割完成：共 {len(split_files)} 個檔案")
+            return split_files
+            
+        except Exception as e:
+            raise Exception(f"分割失敗: {str(e)}")
+
     def compress_file(self, file_path, output_dir):
-        """壓縮檔案"""
+        """壓縮檔案（支援分割）"""
         try:
             file_path = Path(file_path)
             output_dir = Path(output_dir)
             
-            # 建立壓縮檔案名稱
+            # 檢查是否需要分割
+            if self.enable_split.get():
+                split_size = int(self.split_size.get())
+                if self.split_unit.get() == "GB":
+                    split_size *= 1024
+                
+                # 先分割檔案
+                split_files = self.split_file(file_path, split_size)
+                
+                if len(split_files) > 1:
+                    # 需要分割，壓縮所有分割檔案
+                    compressed_files = []
+                    base_name = file_path.stem
+                    
+                    for i, split_file in enumerate(split_files, 1):
+                        if self.compress_format.get() == "zip":
+                            compressed_file = output_dir / f"{base_name}.part{i:03d}.zip"
+                        else:  # 7z
+                            compressed_file = output_dir / f"{base_name}.part{i:03d}.7z"
+                        
+                        password = self.compress_password.get().strip() if self.compress_password.get().strip() else None
+                        
+                        self.log(f"🗜️ 壓縮分割檔案：{split_file.name}")
+                        
+                        if self.compress_format.get() == "zip":
+                            # ZIP壓縮
+                            with zipfile.ZipFile(compressed_file, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                                if password:
+                                    zipf.setpassword(password.encode('utf-8'))
+                                zipf.write(split_file, split_file.name)
+                        else:
+                            # 7Z壓縮
+                            with py7zr.SevenZipFile(compressed_file, 'w', password=password) as archive:
+                                archive.write(split_file, split_file.name)
+                        
+                        compressed_files.append(str(compressed_file))
+                        self.log(f"✅ 壓縮完成：{compressed_file.name}")
+                    
+                    # 清理分割檔案
+                    for split_file in split_files:
+                        split_file.unlink()
+                    if split_files[0].parent.exists():
+                        split_files[0].parent.rmdir()
+                    
+                    return compressed_files
+            
+            # 正常壓縮（不分割）
             if self.compress_format.get() == "zip":
                 compressed_file = output_dir / f"{file_path.stem}.zip"
             else:
@@ -539,13 +662,13 @@ class KatFileUploaderEnhanced:
                     archive.write(file_path, file_path.name)
             
             self.log(f"✅ 壓縮完成：{compressed_file.name}")
-            return str(compressed_file)
+            return [str(compressed_file)]
             
         except Exception as e:
             self.log(f"❌ 壓縮失敗：{str(e)}")
             return None
     
-    def generate_word_document(self, file_info, download_link, compressed_file=None):
+    def generate_word_document(self, file_info, download_links, compressed_files):
         """生成Word文件記錄"""
         try:
             if self.word_template_path and os.path.exists(self.word_template_path):
@@ -566,10 +689,19 @@ class KatFileUploaderEnhanced:
                 table = doc.add_table(rows=6, cols=2)
                 table.style = 'Table Grid'
                 
+                # 取得壓縮檔名稱（用於顯示）
+                if isinstance(compressed_files, list) and len(compressed_files) > 1:
+                    # 分割檔案情況，使用基礎名稱
+                    compressed_name = Path(compressed_files[0]).stem.replace('.part001', '')
+                else:
+                    # 單一檔案情況
+                    compressed_file = compressed_files[0] if isinstance(compressed_files, list) else compressed_files
+                    compressed_name = Path(compressed_file).stem
+                
                 # 填入資訊
                 cells = table.rows[0].cells
                 cells[0].text = "【影片名稱】"
-                cells[1].text = f"：{file_info['name']}"
+                cells[1].text = f"：{compressed_name}"
                 
                 cells = table.rows[1].cells
                 cells[0].text = "【影片格式】"
@@ -585,7 +717,7 @@ class KatFileUploaderEnhanced:
                 
                 cells = table.rows[4].cells
                 cells[0].text = "【解壓密碼】"
-                if compressed_file and self.compress_password.get().strip():
+                if self.compress_enabled.get() and self.compress_password.get().strip():
                     cells[1].text = f"：{self.compress_password.get().strip()}"
                 else:
                     cells[1].text = "：無"
@@ -596,29 +728,56 @@ class KatFileUploaderEnhanced:
                 paragraph = cells[1].paragraphs[0]
                 paragraph.text = "："
                 
-                # 建立超連結
-                hyperlink = self.add_hyperlink(paragraph, download_link, file_info['name'])
-                if not hyperlink:
-                    # 如果超連結建立失敗，至少顯示連結文字
-                    run = paragraph.add_run(f"{file_info['name']} - {download_link}")
-                    run.font.color.rgb = RGBColor(0, 0, 255)  # 藍色文字
+                # 處理多個下載連結（分割檔案）
+                if isinstance(download_links, list) and len(download_links) > 1:
+                    for i, (compressed_file, download_link) in enumerate(zip(compressed_files, download_links)):
+                        if i > 0:
+                            paragraph.add_run("\n")
+                        
+                        part_name = Path(compressed_file).name
+                        hyperlink_success = self.add_hyperlink(paragraph, download_link, part_name)
+                        if not hyperlink_success:
+                            run = paragraph.add_run(f"{part_name}")
+                            run.font.color.rgb = RGBColor(0, 0, 255)
+                else:
+                    # 單一檔案
+                    download_link = download_links[0] if isinstance(download_links, list) else download_links
+                    compressed_file = compressed_files[0] if isinstance(compressed_files, list) else compressed_files
+                    file_name = Path(compressed_file).name
+                    
+                    hyperlink_success = self.add_hyperlink(paragraph, download_link, file_name)
+                    if not hyperlink_success:
+                        run = paragraph.add_run(f"{file_name}")
+                        run.font.color.rgb = RGBColor(0, 0, 255)
                 
                 # 添加空行和截圖區域
                 doc.add_paragraph()
                 doc.add_paragraph("【影片截圖】：")
                 doc.add_paragraph()
                 
-                # 添加底部標題
-                footer_title = doc.add_heading("我的伊利所有帖子", level=2)
-                footer_title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                # 添加固定內容與超連結
+                eli_para = doc.add_paragraph()
+                eli_hyperlink = self.add_hyperlink(eli_para, "https://www.eyny.com/forum-230-1.html", "我的伊莉所有帖子")
+                if not eli_hyperlink:
+                    run = eli_para.add_run("我的伊莉所有帖子")
+                    run.font.color.rgb = RGBColor(0, 0, 255)
                 
                 # 添加標籤
-                tags_para = doc.add_paragraph("破處, 國產, 學妹, 蘿莉, 處女")
-                tags_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                doc.add_paragraph("破處, 國產, 學妹, 蘿莉, 處女")
             
-            # 儲存Word文件
+            # 儲存Word文件（使用壓縮檔名稱）
             file_dir = Path(file_info['path']).parent
-            word_filename = f"{Path(file_info['name']).stem}_記錄.docx"
+            
+            # 取得壓縮檔名稱作為Word文件名稱
+            if isinstance(compressed_files, list) and len(compressed_files) > 1:
+                # 分割檔案情況，使用基礎名稱
+                compressed_name = Path(compressed_files[0]).stem.replace('.part001', '')
+            else:
+                # 單一檔案情況
+                compressed_file = compressed_files[0] if isinstance(compressed_files, list) else compressed_files
+                compressed_name = Path(compressed_file).stem
+            
+            word_filename = f"{compressed_name}_記錄.docx"
             word_path = file_dir / word_filename
             
             doc.save(str(word_path))
@@ -1164,10 +1323,31 @@ class KatFileUploaderEnhanced:
                         # 生成Word文件
                         if self.generate_word.get():
                             self.root.after(0, lambda idx=i: self.update_file_status(idx, "生成文件..."))
-                            word_file = self.generate_word_document(file_info, download_link, compressed_file)
-                            if word_file:
-                                word_msg = f"📄 Word文件: {word_file}"
-                                self.root.after(0, lambda msg=word_msg: self.log(msg))
+                            # 處理分割檔案的情況
+                            if isinstance(compressed_file, list):
+                                # 分割檔案：需要多個下載連結
+                                download_links = []
+                                for cf in compressed_file:
+                                    # 為每個分割檔案獲取下載連結
+                                    part_link = self.upload_single_file({
+                                        'path': cf,
+                                        'name': os.path.basename(cf),
+                                        'size': os.path.getsize(cf)
+                                    }, self.current_folder_id)
+                                    if part_link:
+                                        download_links.append(part_link)
+                                
+                                if download_links:
+                                    word_file = self.generate_word_document(file_info, download_links, compressed_file)
+                                    if word_file:
+                                        word_msg = f"📄 Word文件: {word_file}"
+                                        self.root.after(0, lambda msg=word_msg: self.log(msg))
+                            else:
+                                # 單一檔案
+                                word_file = self.generate_word_document(file_info, [download_link], [compressed_file])
+                                if word_file:
+                                    word_msg = f"📄 Word文件: {word_file}"
+                                    self.root.after(0, lambda msg=word_msg: self.log(msg))
                     else:
                         self.root.after(0, lambda idx=i: self.update_file_status(idx, "❌ 失敗"))
                         
