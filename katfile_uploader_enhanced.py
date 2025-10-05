@@ -177,34 +177,34 @@ class KatFileUploaderEnhanced:
         ).pack(side=tk.RIGHT, padx=(5, 0))
         
         # 檔案分割設定
-        split_frame = ttk.LabelFrame(compress_frame, text="檔案分割設定", padding="10")
-        split_frame.pack(fill="x", pady=(10, 0))
+        split_frame = ttk.LabelFrame(parent, text="檔案分割設定", padding="10")
+        split_frame.pack(fill=tk.X, padx=10, pady=10)
         
         self.enable_split = tk.BooleanVar(value=False)
         ttk.Checkbutton(split_frame, text="啟用檔案分割", variable=self.enable_split, 
-                       command=self.toggle_split_options).pack(anchor="w")
+                       command=self.toggle_split_options).pack(anchor=tk.W)
         
         self.split_options_frame = ttk.Frame(split_frame)
-        self.split_options_frame.pack(fill="x", pady=(10, 0))
+        self.split_options_frame.pack(fill=tk.X, pady=(10, 0))
         
         # 分割大小設定
         size_frame = ttk.Frame(self.split_options_frame)
-        size_frame.pack(fill="x")
+        size_frame.pack(fill=tk.X)
         
-        ttk.Label(size_frame, text="分割大小:").pack(side="left")
+        ttk.Label(size_frame, text="分割大小:").pack(side=tk.LEFT)
         self.split_size = tk.StringVar(value="100")
-        ttk.Entry(size_frame, textvariable=self.split_size, width=10).pack(side="left", padx=(5, 0))
+        ttk.Entry(size_frame, textvariable=self.split_size, width=10).pack(side=tk.LEFT, padx=(5, 0))
         
         self.split_unit = tk.StringVar(value="MB")
         unit_combo = ttk.Combobox(size_frame, textvariable=self.split_unit, values=["MB", "GB"], 
                                  state="readonly", width=5)
-        unit_combo.pack(side="left", padx=(5, 0))
+        unit_combo.pack(side=tk.LEFT, padx=(5, 0))
         
         # 初始狀態設定
         self.toggle_split_options()
 
         # 壓縮測試按鈕
-        ttk.Button(compress_frame, text="🧪 測試壓縮", command=self.test_compression).pack(pady=10)
+        ttk.Button(parent, text="🧪 測試壓縮", command=self.test_compression).pack(pady=10)
         
         # 壓縮說明
         info_frame = ttk.LabelFrame(parent, text="說明", padding="10")
