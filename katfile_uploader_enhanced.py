@@ -1281,22 +1281,85 @@ class KatFileUploaderEnhanced:
                     
                     if self.compress_enabled.get():
                         self.root.after(0, lambda idx=i: self.update_file_status(idx, "壓縮中..."))
-                        compressed_file = self.compress_file(file_info['path'], temp_dir)
-                        if compressed_file:
-                            upload_file_path = compressed_file
-                            # 更新檔案資訊用於上傳
-                            upload_file_info = {
-                                'path': upload_file_path,
-                                'name': os.path.basename(upload_file_path),
-                                'size': os.path.getsize(upload_file_path)
-                            }
+                        compressed_files = self.compress_file(file_info['path'], temp_dir)
+                        if compressed_files:
+                            # 處理分割檔案的情況
+                            if isinstance(compressed_files, list) and len(compressed_files) > 1:
+                                # 分割檔案：需要上傳多個檔案
+                                self.root.after(0, lambda idx=i: self.update_file_status(idx, "上傳分割檔案..."))
+                                download_links = []
+                                
+                                for j, compressed_file in enumerate(compressed_files):
+                                    part_info = {
+                                        'path': compressed_file,
+                                        'name': os.path.basename(compressed_file),
+                                        'size': os.path.getsize(compressed_file)
+                                    }
+                                    
+                                    part_link = self.upload_single_file(part_info, self.current_folder_id)
+                                    if part_link:
+                                        download_links.append(part_link)
+                                        self.root.after(0, lambda idx=i, part=j+1, total=len(compressed_files): 
+                                                       self.update_file_status(idx, f"已上傳 {part}/{total} 個分割檔案"))
+                                    else:
+                                        self.root.after(0, lambda idx=i: self.update_file_status(idx, f"❌ 分割檔案 {j+1} 上傳失敗"))
+                                        break
+                                
+                                if len(download_links) == len(compressed_files):
+                                    # 所有分割檔案上傳成功
+                                    success_count += 1
+                                    self.root.after(0, lambda idx=i: self.update_file_status(idx, "✅ 完成"))
+                                    
+                                    # 生成Word文件
+                                    if self.generate_word.get():
+                                        self.root.after(0, lambda idx=i: self.update_file_status(idx, "生成文件..."))
+                                        word_file = self.generate_word_document(file_info, download_links, compressed_files)
+                                        if word_file:
+                                            word_msg = f"📄 Word文件: {word_file}"
+                                            self.root.after(0, lambda msg=word_msg: self.log(msg))
+                                    
+                                    # 記錄上傳資訊
+                                    upload_record = {
+                                        'filename': file_info['name'],
+                                        'filesize': self.format_file_size(file_info['size']),
+                                        'upload_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                                        'download_link': f"{len(download_links)} 個分割檔案",
+                                        'status': '成功'
+                                    }
+                                    self.upload_records.append(upload_record)
+                                    
+                                    success_msg = f"✅ 分割上傳成功: {file_info['name']} ({len(download_links)} 個檔案)"
+                                    self.root.after(0, lambda msg=success_msg: self.log(msg))
+                                else:
+                                    self.root.after(0, lambda idx=i: self.update_file_status(idx, "❌ 分割上傳失敗"))
+                                
+                                # 清理分割檔案
+                                for compressed_file in compressed_files:
+                                    if os.path.exists(compressed_file):
+                                        try:
+                                            os.remove(compressed_file)
+                                        except:
+                                            pass
+                                
+                                # 跳過後續的單檔案處理
+                                self.root.after(0, lambda: self.progress.step())
+                                continue
+                            else:
+                                # 單一檔案
+                                compressed_file = compressed_files[0]
+                                upload_file_info = {
+                                    'path': compressed_file,
+                                    'name': os.path.basename(compressed_file),
+                                    'size': os.path.getsize(compressed_file)
+                                }
                         else:
                             self.root.after(0, lambda idx=i: self.update_file_status(idx, "❌ 壓縮失敗"))
                             continue
                     else:
                         upload_file_info = file_info
+                        compressed_file = None
                     
-                    # 上傳檔案
+                    # 上傳單一檔案
                     self.root.after(0, lambda idx=i: self.update_file_status(idx, "上傳中..."))
                     
                     download_link = self.upload_single_file(upload_file_info, self.current_folder_id)
@@ -1323,31 +1386,16 @@ class KatFileUploaderEnhanced:
                         # 生成Word文件
                         if self.generate_word.get():
                             self.root.after(0, lambda idx=i: self.update_file_status(idx, "生成文件..."))
-                            # 處理分割檔案的情況
-                            if isinstance(compressed_file, list):
-                                # 分割檔案：需要多個下載連結
-                                download_links = []
-                                for cf in compressed_file:
-                                    # 為每個分割檔案獲取下載連結
-                                    part_link = self.upload_single_file({
-                                        'path': cf,
-                                        'name': os.path.basename(cf),
-                                        'size': os.path.getsize(cf)
-                                    }, self.current_folder_id)
-                                    if part_link:
-                                        download_links.append(part_link)
-                                
-                                if download_links:
-                                    word_file = self.generate_word_document(file_info, download_links, compressed_file)
-                                    if word_file:
-                                        word_msg = f"📄 Word文件: {word_file}"
-                                        self.root.after(0, lambda msg=word_msg: self.log(msg))
-                            else:
-                                # 單一檔案
+                            # 單一檔案的Word文件生成
+                            if compressed_file:
                                 word_file = self.generate_word_document(file_info, [download_link], [compressed_file])
-                                if word_file:
-                                    word_msg = f"📄 Word文件: {word_file}"
-                                    self.root.after(0, lambda msg=word_msg: self.log(msg))
+                            else:
+                                # 未壓縮的檔案
+                                word_file = self.generate_word_document(file_info, [download_link], [file_info['path']])
+                            
+                            if word_file:
+                                word_msg = f"📄 Word文件: {word_file}"
+                                self.root.after(0, lambda msg=word_msg: self.log(msg))
                     else:
                         self.root.after(0, lambda idx=i: self.update_file_status(idx, "❌ 失敗"))
                         
