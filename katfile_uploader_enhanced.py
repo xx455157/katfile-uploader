@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-KatFile 增強版上傳工具 v3.3
-包含檔案壓縮和Word文件記錄功能
+KatFile 增強版上傳工具 v3.4
+包含檔案壓縮、分割和Word文件記錄功能
 """
 
 import tkinter as tk
@@ -10,21 +10,15 @@ from tkinter import ttk, filedialog, messagebox, scrolledtext, simpledialog
 import requests
 import json
 import os
+import tempfile
 import threading
 import time
-from pathlib import Path
 from datetime import datetime
-import sys
-from urllib.parse import urlencode, quote
-import socket
-import urllib3
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
-import re
+from urllib.parse import quote
 import zipfile
 import py7zr
 from docx import Document
-from docx.shared import Inches, RGBColor
+from docx.shared import Inches
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.shared import OxmlElement, qn
 import shutil
@@ -1503,19 +1497,46 @@ class KatFileUploaderEnhanced:
                         self.root.after(0, lambda msg=warning_msg: self.log(msg))
                         
                 # 第四步：獲取直接下載連結
-                try:
-                    direct_url = f"https://katfile.cloud/api/file/direct_link?key={quote(key)}&file_code={file_code}"
-                    direct_response = self.session.get(direct_url, timeout=30, allow_redirects=True)
-                    
-                    if direct_response.status_code == 200:
-                        direct_data = direct_response.json()
-                        if direct_data.get('msg') == 'OK':
-                            return direct_data['result']['url']
-                except:
-                    pass
+                direct_link = None
+                for retry in range(3):  # 重試3次
+                    try:
+                        direct_url = f"https://katfile.cloud/api/file/direct_link?key={quote(key)}&file_code={file_code}"
+                        self.root.after(0, lambda: self.log(f"🔗 獲取直接下載連結: {direct_url}"))
                         
-                # 如果無法獲取直接連結，返回網頁連結
-                return f"https://katfile.cloud/{file_code}"
+                        direct_response = self.session.get(direct_url, timeout=30, allow_redirects=True)
+                        
+                        if direct_response.status_code == 200:
+                            direct_data = direct_response.json()
+                            self.root.after(0, lambda: self.log(f"📄 API回應: {direct_data}"))
+                            
+                            if direct_data.get('msg') == 'OK' and 'result' in direct_data:
+                                direct_link = direct_data['result']['url']
+                                file_size = direct_data['result'].get('size', 0)
+                                self.root.after(0, lambda: self.log(f"✅ 獲取直接連結成功: {direct_link}"))
+                                self.root.after(0, lambda: self.log(f"📊 檔案大小: {self.format_file_size(file_size)}"))
+                                break
+                            else:
+                                error_msg = f"❌ API錯誤: {direct_data.get('msg', '未知錯誤')}"
+                                self.root.after(0, lambda msg=error_msg: self.log(msg))
+                        else:
+                            error_msg = f"❌ HTTP錯誤: {direct_response.status_code}"
+                            self.root.after(0, lambda msg=error_msg: self.log(msg))
+                            
+                    except Exception as e:
+                        error_msg = f"❌ 獲取直接連結失敗 (嘗試 {retry + 1}/3): {str(e)}"
+                        self.root.after(0, lambda msg=error_msg: self.log(msg))
+                        if retry < 2:  # 不是最後一次重試
+                            time.sleep(2)  # 等待2秒後重試
+                
+                # 返回結果
+                if direct_link:
+                    return direct_link
+                else:
+                    # 如果無法獲取直接連結，返回網頁連結作為備用
+                    webpage_link = f"https://katfile.cloud/{file_code}"
+                    warning_msg = f"⚠️ 無法獲取直接下載連結，使用網頁連結: {webpage_link}"
+                    self.root.after(0, lambda msg=warning_msg: self.log(msg))
+                    return webpage_link
                 
             except Exception as error:
                 error_msg = f"❌ 上傳錯誤 (嘗試 {attempt + 1}/{max_retries}): {str(error)}"
