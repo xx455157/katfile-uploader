@@ -15,6 +15,7 @@ import threading
 import time
 from datetime import datetime
 from urllib.parse import quote
+from pathlib import Path
 import zipfile
 import py7zr
 from docx import Document
