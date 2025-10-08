@@ -8,6 +8,8 @@ KatFile 增強版上傳工具 v3.4
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext, simpledialog
 import requests
+from requests.adapters import HTTPAdapter
+from requests.packages.urllib3.util.retry import Retry
 import json
 import os
 import tempfile
